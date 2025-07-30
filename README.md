@@ -54,6 +54,7 @@ mkdir -p data/vggface2/test
 ```
 Organize da seguinte maneira
 
+```
 data/vggface2/
 ├── train/
 │   ├── n000001/
@@ -65,7 +66,8 @@ data/vggface2/
     ├── n000001/
     ├── n000002/
     └── ...
-    
+```
+ 
 ### 5. Treinamento
 
 ```
