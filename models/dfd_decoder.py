@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class DFDDecoder(nn.Module):
-    """Deep Face Decoder - Inverted VGG architecture"""
+    """Deep Face Decoder - Inverted VGG architecture (FIXED VERSION)"""
     
     def __init__(self, embedding_dim=512, image_size=224):
         super(DFDDecoder, self).__init__()
@@ -13,20 +13,21 @@ class DFDDecoder(nn.Module):
         # Calculate initial feature map size
         init_size = image_size // 32  # After 5 downsampling layers
         
-        # Initial projection
+        # Initial projection with better initialization
         self.fc = nn.Sequential(
             nn.Linear(embedding_dim, 512 * init_size * init_size),
+            nn.BatchNorm1d(512 * init_size * init_size),
             nn.ReLU(True)
         )
         
-        # Decoder layers (inverted VGG)
+        # Decoder layers (inverted VGG) with skip connections consideration
         self.decoder = nn.Sequential(
             # Block 1: 512 -> 512
             nn.ConvTranspose2d(512, 512, 4, 2, 1),  # 7x7 -> 14x14
             nn.BatchNorm2d(512),
             nn.ReLU(True),
             
-            # Block 2: 512 -> 256
+            # Block 2: 512 -> 256  
             nn.ConvTranspose2d(512, 256, 4, 2, 1),  # 14x14 -> 28x28
             nn.BatchNorm2d(256),
             nn.ReLU(True),
@@ -48,11 +49,30 @@ class DFDDecoder(nn.Module):
             
             # Final layer: 32 -> 3
             nn.Conv2d(32, 3, 3, 1, 1),
-            nn.Tanh()  # Output in [-1, 1]
+            # CRITICAL FIX: Use Sigmoid instead of Tanh for ImageNet normalization
+            nn.Sigmoid()  # Output in [0, 1] - matches denormalized ImageNet range
         )
         
-        # Dropout layers for regularization
-        self.dropout = nn.Dropout(0.5)
+        # Reduced dropout for better learning
+        self.dropout = nn.Dropout(0.2)  # Reduced from 0.5
+        
+        # Initialize weights properly
+        self._initialize_weights()
+        
+    def _initialize_weights(self):
+        """Initialize weights using Xavier/He initialization"""
+        for m in self.modules():
+            if isinstance(m, (nn.ConvTranspose2d, nn.Conv2d)):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
         
     def forward(self, embedding):
         batch_size = embedding.size(0)
@@ -64,8 +84,9 @@ class DFDDecoder(nn.Module):
         init_size = self.image_size // 32
         x = x.view(batch_size, 512, init_size, init_size)
         
-        # Apply dropout
-        x = self.dropout(x)
+        # Apply dropout only during training
+        if self.training:
+            x = self.dropout(x)
         
         # Decode to image
         reconstructed = self.decoder(x)
